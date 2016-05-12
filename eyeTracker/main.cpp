@@ -32,7 +32,9 @@ const int    kScaledDownEyeWidth = 50;
 
 // Global variables
 string face_cascade_path = "/Users/paminalin/Developer/eyeTracker/haarcascade_frontalface_alt.xml";
+string eye_cascade_path = "/Users/paminalin/Developer/eyeTracker/haarcascade_eye.xml";
 cv::CascadeClassifier face_cascade; // CascadeClassifier class detects objects in a video stream (load Haar or LBP classifiers or detectMultiScale to perform detection)
+cv::CascadeClassifier eye_cascade;
 
 
 // Helper functions (move to other file later)
@@ -105,7 +107,7 @@ Mat computeMagnitudes(Mat mat1, Mat mat2) {
     return mag;
 }
 
-double computeGradientThreshold(Mat gradient) {
+double calculateGradientThreshold(Mat gradient) {
     Scalar stdDev;
     Scalar mean;
     meanStdDev(gradient, mean, stdDev);
@@ -113,13 +115,15 @@ double computeGradientThreshold(Mat gradient) {
     //cout << "stdDev: " << stdDev[0] << endl;
     double stdDevScaled = stdDev[0] / sqrt(gradient.rows*gradient.cols);
     return mean[0] + stdDevScaled*50; // trying 50 for now based on recommendation from article
+    
+    //return mean[0] + stdDev[0]/10.0;
 }
 
 void normalizeMats(Mat &mat1, Mat &mat2) {
     Mat magnitudes = computeMagnitudes(mat1, mat2);
     
     // Get some sort of threshold so if the gradient is under the threshold, just set it to zero
-    double gradThreshold = computeGradientThreshold(magnitudes);
+    double gradThreshold = calculateGradientThreshold(magnitudes);
     //cout << "threshold: " << gradThreshold << endl;
     for (int j=0; j<mat1.rows; j++) {
         double * mat1Ptr = mat1.ptr<double>(j);
@@ -253,8 +257,8 @@ Point findEyeCenter(Mat eyeImageUnscaled, Rect eyeROI, String window) {
     //imshow("grady", gradY);
     
     normalizeMats(gradX, gradY);
-    //imshow("gradx", gradX);
-    //imshow("grady", gradY);
+    //imshow("gradx normalized", gradX);
+    //imshow("grady normalized", gradY);
     
     // Get a "weight" Mat, equal to the inverse gray-scale image
     Mat weight = getWeightedImage(eyeImage);
@@ -285,6 +289,8 @@ Point findEyeCenter(Mat eyeImageUnscaled, Rect eyeROI, String window) {
     //cout << "numGradients: " << numGradients << endl;
     Mat resultScaled;
     result.convertTo(resultScaled, CV_32F, 1.0/numGradients);
+    
+    imshow("result", resultScaled);
     //resultScaled = result;
     Point maxCenter;
     double maxDotProduct = 0;
@@ -320,18 +326,76 @@ Point findEyeCenter(Mat eyeImageUnscaled, Rect eyeROI, String window) {
     //maxCenter.y += faceRegion.y;
     Point resultCenter = unscalePoint(maxCenter, eyeROI);
     circle(eyeImage, maxCenter, 3, CV_RGB(0,0,255), -1);
-    imshow("eye", eyeImage);
+    //imshow("eye", eyeImage);
     return resultCenter;
 }
 
+vector<Point> detectCorner(Mat eyeImage) {
+    vector<Point> corners = vector<Point>();
+    goodFeaturesToTrack(eyeImage, corners, 10, 0.02, 5); // what number makes sense for the "quality level" parameter?  just using 0.02 for now
+    return corners;
+}
 
 
 void detectEyes(Mat &frame, Rect faceRect) {
     //cout << "detect eyes" << endl;
     Mat face_image = frame(faceRect);
     
-    // TODO: replace and use haar cascades
+    // haar cascade ends up giving a lot of false positives
+    /*
     // find eye regions and draw them
+    vector<Rect_<int> > eyes = vector<Rect_<int>>();
+    eye_cascade.detectMultiScale(face_image, eyes);
+    int numEyes = eyes.size();
+    cout << "numEyes detected:" << numEyes << endl;
+    vector<Mat> eyeVector = vector<Mat>();
+    vector<Point> pupilVector = vector<Point>();
+    
+    // need to translate eye rect to the right frame of reference?
+    for (int i=0; i<numEyes; i++) {
+        Rect eye = eyes.at(i);
+        cout << "(X,Y):" << eyes.at(i).x << ", " << eye.y << endl;
+        cout << "faceRect (X,Y): " << faceRect.x << ", " << faceRect.y << endl;
+        // Translate eye rect coordinates to face rect frame of reference
+        eye.x = eye.x + faceRect.x;
+        eye.y = eye.y + faceRect.y;
+        cout << "(X,Y):" << eye.x << ", " << eye.y << endl;
+        cout << "face_image rows: " << face_image.rows << endl;
+        cout << "eye height: " << eye.height << endl;
+        Mat eyeImage = getSubImage(face_image, faceRect, eye);
+        eyeVector.push_back(eyeImage);
+        Point pupil = findEyeCenter(eyeImage, eye, "eye");
+        pupilVector.push_back(pupil);
+        // draw
+        rectangle(frame, eye, CV_RGB(0,0,255), 1);
+        circle(eyeImage, pupil, 3, CV_RGB(0,0,255), -1);
+    }
+    */
+    
+    /*
+    // Helper functions (move to other file later)
+    vector<Rect_ <int> > detectFaces(Mat frame, string cascade_path) {
+        vector<Rect_<int> > faces = vector<Rect_<int>>();
+        
+        // Load the cascade
+        cv::CascadeClassifier face_cascade;
+        if (!face_cascade.load(cascade_path)) {
+            cout << "Error loading face cascade." << endl;
+            return faces;
+        }
+        
+        /*Mat original_copy = frame.clone();  <-- now converting to gray before this function
+         Mat gray_copy;
+         cvtColor(original_copy, gray_copy, CV_BGR2GRAY);
+     
+        face_cascade.detectMultiScale(frame, faces);
+        return faces;
+    
+    }
+
+    */
+
+    
     int width = faceRect.width;
     int height = faceRect.height;
     int eyeRegionTop = height * kEyeTopFraction;
@@ -350,11 +414,16 @@ void detectEyes(Mat &frame, Rect faceRect) {
     // Get subimages
     Mat leftEyeImage = getSubImage(face_image, faceRect, leftEyeRegion);
     Mat rightEyeImage = getSubImage(face_image, faceRect, rightEyeRegion);
-
     
     // find eye center
     Point leftPupil = findEyeCenter(leftEyeImage, leftEyeRegion, "left eye");
     Point rightPupil = findEyeCenter(rightEyeImage, rightEyeRegion, "right eye");
+    
+    // find eye corners
+    vector<Point> leftCorners = detectCorner(leftEyeImage);
+    vector<Point> rightCorners = detectCorner(rightEyeImage);
+    cout << "num left corners: " << leftCorners.size() << endl;
+    cout << "num right corners: " << rightCorners.size() << endl;
 
 
     // draw
@@ -362,8 +431,16 @@ void detectEyes(Mat &frame, Rect faceRect) {
     rectangle(frame, rightEyeRegion, CV_RGB(0,0,255), 1);
     circle(leftEyeImage, leftPupil, 3, CV_RGB(0,0,255), -1);
     circle(rightEyeImage, rightPupil, 3, CV_RGB(0,0,255), -1);
+    for (int i=0; i<leftCorners.size(); i++) {
+        circle(leftEyeImage, leftCorners.at(i), 2, CV_RGB(0,0,255), -1);
+    }
+    for (int i=0; i<rightCorners.size(); i++) {
+        circle(rightEyeImage, rightCorners.at(i), 2, CV_RGB(0,0,255), -1);
+    }
+    
     return;
 }
+
 
 Rect getBiggestFace(vector<Rect_ <int>> faces) {
     int maxSize = 0;
@@ -385,12 +462,16 @@ int main() {
         cout << "Error loading face cascade." << endl;
         return -1;
     }
+    if (!eye_cascade.load(eye_cascade_path)) {
+        cout << "Error loading eye cascade." << endl;
+        return -1;
+    }
     
     //namedWindow(main_window_name, CV_WINDOW_NORMAL);
     
     VideoCapture cap(-1); // switch back to 0?  which is which
     if (!cap.isOpened()) {
-        cout << "Webcame is not open." << endl;
+        cout << "Webcam is not open." << endl;
         return -1;
     }
     
