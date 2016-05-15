@@ -160,7 +160,7 @@ Mat getWeightedImage(Mat image) {
     
     //blur(image, weight, Size(kWeightBlurSize, kWeightBlurSize));
     for (int j=0; j<weight.rows; j++) {
-        unsigned char * rowPtr = weight.ptr<unsigned char>(j); // MAYBE THE PTR DATA TYPE IS NOT RIGHT?
+        unsigned char * rowPtr = weight.ptr<unsigned char>(j);
         for (int i=0; i<weight.cols; i++) {
             rowPtr[i] = (255 - rowPtr[i]);
         }
@@ -257,12 +257,12 @@ Point findEyeCenter(Mat eyeImageUnscaled, Rect eyeROI, String window) {
     //imshow("grady", gradY);
     
     normalizeMats(gradX, gradY);
-    //imshow("gradx normalized", gradX);
-    //imshow("grady normalized", gradY);
+    imshow("gradx normalized", gradX);
+    imshow("grady normalized", gradY);
     
     // Get a "weight" Mat, equal to the inverse gray-scale image
     Mat weight = getWeightedImage(eyeImage);
-    //imshow("weight", weight);
+    imshow("weight", weight);
     
     // Set up the result Mat
     Mat result = Mat::zeros(eyeImage.rows, eyeImage.cols, CV_64F);
@@ -274,6 +274,7 @@ Point findEyeCenter(Mat eyeImageUnscaled, Rect eyeROI, String window) {
         for (int i=0; i<eyeImage.cols; i++) {
             double gradX = gradXPtr[i];
             double gradY = gradYPtr[i];
+            cout << "gradX, gradY: " << gradX << ", " << gradY << endl;
             // if the gradient is 0, ignore the point
             if (gradX == 0.0 && gradY == 0.0) {
                 continue;
@@ -316,7 +317,6 @@ Point findEyeCenter(Mat eyeImageUnscaled, Rect eyeROI, String window) {
 
     //cout << "max dot product " << maxDotProduct << endl;
     //cout << "max center" << maxCenter.x << ", " << maxCenter.y << endl;
-    
     //cout << "best center: (" << maxCenter.x << ", " << maxCenter.y << ")" << endl;
     //cout << "eyeRegion: (" << eyeRegion.x << ", "<< eyeRegion.y << ")" << endl;
     //cout << "faceRegion: (" << faceRegion.x << ", " << faceRegion.y << ")" << endl;
@@ -326,13 +326,16 @@ Point findEyeCenter(Mat eyeImageUnscaled, Rect eyeROI, String window) {
     //maxCenter.y += faceRegion.y;
     Point resultCenter = unscalePoint(maxCenter, eyeROI);
     circle(eyeImage, maxCenter, 3, CV_RGB(0,0,255), -1);
-    //imshow("eye", eyeImage);
+    imshow("eye", eyeImage);
+    //const double * eyePtr = eyeImage.ptr<double>(maxCenter.y);
+    //cout << "color at pupil: " << eyePtr[maxCenter.x] << endl;
     return resultCenter;
 }
 
-vector<Point> detectCorner(Mat eyeImage) {
+vector<Point> detectCorner(Mat eyeImage, Rect ROI) {
+    Mat img = eyeImage(ROI);
     vector<Point> corners = vector<Point>();
-    goodFeaturesToTrack(eyeImage, corners, 10, 0.02, 5); // what number makes sense for the "quality level" parameter?  just using 0.02 for now
+    goodFeaturesToTrack(img, corners, 10, 0.02, 5); // what number makes sense for the "quality level" parameter?  just using 0.02 for now
     return corners;
 }
 
@@ -341,7 +344,7 @@ void detectEyes(Mat &frame, Rect faceRect) {
     //cout << "detect eyes" << endl;
     Mat face_image = frame(faceRect);
     
-    // haar cascade ends up giving a lot of false positives
+    // Using haar cascade (commented out bc it ends up giving a lot of false positives)
     /*
     // find eye regions and draw them
     vector<Rect_<int> > eyes = vector<Rect_<int>>();
@@ -372,36 +375,10 @@ void detectEyes(Mat &frame, Rect faceRect) {
     }
     */
     
-    /*
-    // Helper functions (move to other file later)
-    vector<Rect_ <int> > detectFaces(Mat frame, string cascade_path) {
-        vector<Rect_<int> > faces = vector<Rect_<int>>();
-        
-        // Load the cascade
-        cv::CascadeClassifier face_cascade;
-        if (!face_cascade.load(cascade_path)) {
-            cout << "Error loading face cascade." << endl;
-            return faces;
-        }
-        
-        /*Mat original_copy = frame.clone();  <-- now converting to gray before this function
-         Mat gray_copy;
-         cvtColor(original_copy, gray_copy, CV_BGR2GRAY);
-     
-        face_cascade.detectMultiScale(frame, faces);
-        return faces;
-    
-    }
-
-    */
-
-    
     int width = faceRect.width;
     int height = faceRect.height;
     int eyeRegionTop = height * kEyeTopFraction;
     int eyeRegionSide = width * kEyeSideFraction;
-    
-    
     int eyeRegionWidth = width * kEyeWidthFraction;
     int eyeRegionHeight = width * kEyeHeightFraction;
     int leftEyeX = faceRect.x + eyeRegionSide;
@@ -419,12 +396,13 @@ void detectEyes(Mat &frame, Rect faceRect) {
     Point leftPupil = findEyeCenter(leftEyeImage, leftEyeRegion, "left eye");
     Point rightPupil = findEyeCenter(rightEyeImage, rightEyeRegion, "right eye");
     
-    // find eye corners
-    vector<Point> leftCorners = detectCorner(leftEyeImage);
-    vector<Point> rightCorners = detectCorner(rightEyeImage);
+    // find corners
+    vector<Point> leftCorners = detectCorner(frame, leftEyeRegion);
+    vector<Point> rightCorners = detectCorner(frame, rightEyeRegion);
     cout << "num left corners: " << leftCorners.size() << endl;
     cout << "num right corners: " << rightCorners.size() << endl;
-
+    
+    // filter through the detected corners to identify two candidate eye corners for each eye
 
     // draw
     rectangle(frame, leftEyeRegion, CV_RGB(0,0,255), 1);
@@ -479,41 +457,66 @@ int main() {
 
     while (true) {
         cap.read(frame);
-        /*
-        if (!frame.empty()) {
-            imshow("frame", frame);
-        }
-        else {
-            cout << "No capture frame" << endl;
-            break;
-        }
-         */
-        
         //Mat weight;
         
         if (frame.rows > 0 && frame.cols > 0) {
-            cvtColor(frame, frame, CV_BGR2GRAY);
-        
-            vector<Rect_ <int>> faces = detectFaces(frame, face_cascade_path);
+            Mat gray;
+            cvtColor(frame, gray, CV_BGR2GRAY);
+            
+            // Convert to HSV to filter out high saturation points
+            Mat hsv;
+            cvtColor(frame, hsv, CV_BGR2HSV);
+            
+            // Split into H, S, and V channels
+            //Mat hsv_channels[3];
+            //split(hsv, hsv_channels);
+            //imshow("hsv H", hsv_channels[0]);
+            //imshow("hsv S", hsv_channels[1]);
+            //imshow("hsv V", hsv_channels[2]);
+            
+            // Playing around with histograms
+            //Mat dst;
+            //equalizeHist(hsv_channels[2], dst);
+            //imshow("before", hsv_channels[2]);
+            //imshow("after", dst);
+            
+            // Binarize the H channel
+            /*Mat binary;
+            adaptiveThreshold(hsv_channels[0], binary, 255, CV_ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY, 701, 0);
+            vector<Point> corners = detectCorner(binary);
+            cout << "numCorners: " << corners.size();
+            for (int i=0; i<corners.size(); i++) {
+                circle(binary, corners.at(i),5,100);
+            }
+            imshow("binary", binary);
+             */
+            
+            
+            vector<Rect_ <int>> faces = detectFaces(gray, face_cascade_path);
             // Get the biggest face
             Rect biggestFace = getBiggestFace(faces);
+            cout << "num faces: " << faces.size();
             if (biggestFace.width > 0 && biggestFace.height > 0) {
                 //weight = getWeightedImage(frame);
                 //imshow("weighted", weight);
-                drawFace(frame, biggestFace);
-                detectEyes(frame, biggestFace);
+                drawFace(gray, biggestFace);
+                detectEyes(gray, biggestFace);
             }
             
+            
+            // GETTING PUPILS
             // Smooth image
             // Detect eyes
             // Calculate gradients
             // Calculate direction vectors
             // Calculate dot products
-            // Calculate weights/Users/paminalin/Desktop/Screen Shot 2016-03-14 at 3.13.59 PM.png
+            // Calculate weights
             // Determine best center
-        
-            imshow("face_detector", frame);
-        
+            
+            //namedWindow("source_window", CV_WINDOW_AUTOSIZE);
+            //namedWindow("equalized_window", CV_WINDOW_AUTOSIZE);
+            imshow("face_detector", gray);
+            
             waitKey(1);
         }
         
