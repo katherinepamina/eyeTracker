@@ -41,22 +41,40 @@ cv::CascadeClassifier eye_cascade;
 vector<Rect_ <int> > detectFaces(Mat frame, string cascade_path) {
     vector<Rect_<int> > faces = vector<Rect_<int>>();
     
-    // Load the cascade
-    cv::CascadeClassifier face_cascade;
-    if (!face_cascade.load(cascade_path)) {
-        cout << "Error loading face cascade." << endl;
-        return faces;
-    }
-    
     /*Mat original_copy = frame.clone();  <-- now converting to gray before this function
     Mat gray_copy;
     cvtColor(original_copy, gray_copy, CV_BGR2GRAY);
      */
     face_cascade.detectMultiScale(frame, faces);
     return faces;
-    
 }
 
+Rect getBiggestFace(vector<Rect_ <int>> faces) {
+    int maxSize = 0;
+    Rect maxFace;
+    for (int i=0; i<faces.size(); i++) {
+        Rect face_i = faces.at(i);
+        int currentSize = face_i.width + face_i.height;
+        if (currentSize > maxSize) {
+            maxSize = currentSize;
+            maxFace = face_i;
+        }
+    }
+    return maxFace;
+}
+
+// Some helper functions to move between frames of references i.e. moving out of a smaller frame of reference within a larger one)
+Point translatePoint(Point p, Rect currentFrame) {
+    p.x = p.x + currentFrame.x;
+    p.y = p.y + currentFrame.y;
+    return p;
+}
+
+Rect translateRect(Rect r, Rect from) {
+    r.x = r.x + from.x;
+    r.y = r.y + from.y;
+    return r;
+}
 
 // Make a draw all things function later
 void drawFace(Mat &frame, Rect_ <int> face) {
@@ -245,25 +263,17 @@ Mat getSubImage(Mat image, Rect imageRect, Rect roi) {
 
 Point findEyeCenter(Mat eyeImageUnscaled, Rect eyeROI, String window) {
     Mat eyeImage;
-    //cout << "eyeImage unscaled size (rows, cols) " << eyeImageUnscaled.rows << ", " << eyeImageUnscaled.cols << ") " << endl;
-    //imshow("unscaled", eyeImageUnscaled);
     scaleDownImage(eyeImageUnscaled, eyeImage);
-    //cout << "eyeImage size (rows, cols) " << eyeImage.rows << ", " << eyeImage.cols << ") " << endl;
-    //imshow("scaled", eyeImage);
+    
     // Get the gradients of the eye image
     Mat gradX = computeXGradient(eyeImage);
     Mat gradY = computeYGradient(eyeImage);
-    //imshow("gradx", gradX);
-    //imshow("grady", gradY);
     
     normalizeMats(gradX, gradY);
-    imshow("gradx normalized", gradX);
-    imshow("grady normalized", gradY);
     
     // Get a "weight" Mat, equal to the inverse gray-scale image
     Mat weight = getWeightedImage(eyeImage);
-    imshow("weight", weight);
-    
+   
     // Set up the result Mat
     Mat result = Mat::zeros(eyeImage.rows, eyeImage.cols, CV_64F);
     
@@ -274,7 +284,7 @@ Point findEyeCenter(Mat eyeImageUnscaled, Rect eyeROI, String window) {
         for (int i=0; i<eyeImage.cols; i++) {
             double gradX = gradXPtr[i];
             double gradY = gradYPtr[i];
-            cout << "gradX, gradY: " << gradX << ", " << gradY << endl;
+            //cout << "gradX, gradY: " << gradX << ", " << gradY << endl;
             // if the gradient is 0, ignore the point
             if (gradX == 0.0 && gradY == 0.0) {
                 continue;
@@ -285,17 +295,11 @@ Point findEyeCenter(Mat eyeImageUnscaled, Rect eyeROI, String window) {
     }
     
     // Look for the maximum dot product (should correspond with the center of the circle)
-    //double numGradients = (eyeImage.rows > 0) ? eyeImage.rows*eyeImage.cols : 0.00001;
     double numGradients = eyeImage.rows * eyeImage.cols;
-    //cout << "numGradients: " << numGradients << endl;
     Mat resultScaled;
     result.convertTo(resultScaled, CV_32F, 1.0/numGradients);
-    
-    imshow("result", resultScaled);
-    //resultScaled = result;
     Point maxCenter;
     double maxDotProduct = 0;
-    //minMaxLoc(resultScaled, NULL, &maxDotProduct, NULL, &maxCenter);
     
     double currentMax = 0;
     Point currentMaxPoint;
@@ -321,24 +325,57 @@ Point findEyeCenter(Mat eyeImageUnscaled, Rect eyeROI, String window) {
     //cout << "eyeRegion: (" << eyeRegion.x << ", "<< eyeRegion.y << ")" << endl;
     //cout << "faceRegion: (" << faceRegion.x << ", " << faceRegion.y << ")" << endl;
     
-    // Need to translate eye point back to original coordinate system
-    //maxCenter.x += faceRegion.x;
-    //maxCenter.y += faceRegion.y;
+    // Need to translate eye point back to original coordinate system (biggestFaceRect)
     Point resultCenter = unscalePoint(maxCenter, eyeROI);
-    circle(eyeImage, maxCenter, 3, CV_RGB(0,0,255), -1);
-    imshow("eye", eyeImage);
+    resultCenter.x += eyeROI.x;
+    resultCenter.y += eyeROI.y;
+    
+    //circle(eyeImage, maxCenter, 3, CV_RGB(0,0,255), -1);
+    //imshow("eye", eyeImage);
     //const double * eyePtr = eyeImage.ptr<double>(maxCenter.y);
     //cout << "color at pupil: " << eyePtr[maxCenter.x] << endl;
     return resultCenter;
 }
 
-vector<Point> detectCorner(Mat eyeImage, Rect ROI) {
-    Mat img = eyeImage(ROI);
+vector<Point> detectCorner(Mat frame, Rect eyeRect) {
+    Mat img = frame(eyeRect);
     vector<Point> corners = vector<Point>();
     goodFeaturesToTrack(img, corners, 10, 0.02, 5); // what number makes sense for the "quality level" parameter?  just using 0.02 for now
+    for (int i=0; i<corners.size(); i++) {
+        corners.at(i) = translatePoint(corners.at(i), eyeRect);
+    }
     return corners;
 }
 
+vector<Rect> getEyeRegionRect(Rect faceRect) {
+    int width = faceRect.width;
+    int height = faceRect.height;
+    int eyeRegionTop = height * kEyeTopFraction;
+    int eyeRegionSide = width * kEyeSideFraction;
+    int eyeRegionWidth = width * kEyeWidthFraction;
+    int eyeRegionHeight = width * kEyeHeightFraction;
+    int leftEyeX = faceRect.x + eyeRegionSide;
+    int rightEyeX = faceRect.x + 2*eyeRegionSide + eyeRegionWidth;
+    int eyeY =  faceRect.y + eyeRegionTop;
+    
+    Rect leftEyeRegion(leftEyeX, eyeY, eyeRegionWidth, eyeRegionHeight);
+    Rect rightEyeRegion(rightEyeX, eyeY, eyeRegionWidth, eyeRegionHeight);
+    
+    vector<Rect> eyeRects = vector<Rect>();
+    eyeRects.push_back(leftEyeRegion);
+    eyeRects.push_back(rightEyeRegion);
+    return eyeRects;
+}
+
+Rect getFilterArea(Rect eyeRect, Point pupil) {
+    Rect filterRect = Rect();
+    filterRect.x = pupil.x - eyeRect.width/5;
+    filterRect.y = pupil.y - eyeRect.height/10;
+    filterRect.height = eyeRect.height/7;
+    filterRect.width = eyeRect.width/1.8;
+
+    return filterRect;
+}
 
 void detectEyes(Mat &frame, Rect faceRect) {
     //cout << "detect eyes" << endl;
@@ -375,63 +412,63 @@ void detectEyes(Mat &frame, Rect faceRect) {
     }
     */
     
-    int width = faceRect.width;
-    int height = faceRect.height;
-    int eyeRegionTop = height * kEyeTopFraction;
-    int eyeRegionSide = width * kEyeSideFraction;
-    int eyeRegionWidth = width * kEyeWidthFraction;
-    int eyeRegionHeight = width * kEyeHeightFraction;
-    int leftEyeX = faceRect.x + eyeRegionSide;
-    int rightEyeX = faceRect.x + 2*eyeRegionSide + eyeRegionWidth;
-    int eyeY =  faceRect.y + eyeRegionTop;
-    
-    Rect leftEyeRegion(leftEyeX, eyeY, eyeRegionWidth, eyeRegionHeight);
-    Rect rightEyeRegion(rightEyeX, eyeY, eyeRegionWidth, eyeRegionHeight);
+    // Get the eye regions using a ratio method
+    vector<Rect> eyeRects = getEyeRegionRect(faceRect);
+    Rect leftEyeRect = eyeRects.at(0);
+    Rect rightEyeRect = eyeRects.at(1); // left and right might be flipped
     
     // Get subimages
-    Mat leftEyeImage = getSubImage(face_image, faceRect, leftEyeRegion);
-    Mat rightEyeImage = getSubImage(face_image, faceRect, rightEyeRegion);
+    Mat leftEyeImage = getSubImage(face_image, faceRect, leftEyeRect);
+    Mat rightEyeImage = getSubImage(face_image, faceRect, rightEyeRect);
     
     // find eye center
-    Point leftPupil = findEyeCenter(leftEyeImage, leftEyeRegion, "left eye");
-    Point rightPupil = findEyeCenter(rightEyeImage, rightEyeRegion, "right eye");
+    Point leftPupil = findEyeCenter(leftEyeImage, leftEyeRect, "left eye");
+    Point rightPupil = findEyeCenter(rightEyeImage, rightEyeRect, "right eye");
     
     // find corners
-    vector<Point> leftCorners = detectCorner(frame, leftEyeRegion);
-    vector<Point> rightCorners = detectCorner(frame, rightEyeRegion);
-    cout << "num left corners: " << leftCorners.size() << endl;
-    cout << "num right corners: " << rightCorners.size() << endl;
-    
+    Rect leftFilterRect = getFilterArea(leftEyeRect, leftPupil);
+    Rect rightFilterRect = getFilterArea(rightEyeRect, rightPupil);
+    vector<Point> potentialLeftCorners = detectCorner(frame, leftEyeRect);
+    vector<Point> potentialRightCorners = detectCorner(frame, rightEyeRect);
+    //cout << "num left corners: " << leftCorners.size() << endl;
+    //cout << "num right corners: " << rightCorners.size() << endl;
+    //cout << "left pupil: " << leftPupil.x << ", " << leftPupil.y << endl;
     // filter through the detected corners to identify two candidate eye corners for each eye
-
-    // draw
-    rectangle(frame, leftEyeRegion, CV_RGB(0,0,255), 1);
-    rectangle(frame, rightEyeRegion, CV_RGB(0,0,255), 1);
-    circle(leftEyeImage, leftPupil, 3, CV_RGB(0,0,255), -1);
-    circle(rightEyeImage, rightPupil, 3, CV_RGB(0,0,255), -1);
-    for (int i=0; i<leftCorners.size(); i++) {
-        circle(leftEyeImage, leftCorners.at(i), 2, CV_RGB(0,0,255), -1);
-    }
-    for (int i=0; i<rightCorners.size(); i++) {
-        circle(rightEyeImage, rightCorners.at(i), 2, CV_RGB(0,0,255), -1);
-    }
-    
-    return;
-}
-
-
-Rect getBiggestFace(vector<Rect_ <int>> faces) {
-    int maxSize = 0;
-    Rect maxFace;
-    for (int i=0; i<faces.size(); i++) {
-        Rect face_i = faces.at(i);
-        int currentSize = face_i.width + face_i.height;
-        if (currentSize > maxSize) {
-            maxSize = currentSize;
-            maxFace = face_i;
+    //look for the rightmost corner for each eye
+    Point leftCorner = Point();
+    int maxLeftCol = 0;
+    for (int i=0; i<potentialLeftCorners.size(); i++) {
+        Point potential = potentialLeftCorners.at(i);
+        if (potential.x > maxLeftCol &&
+            potential.x > leftFilterRect.x && potential.x <= leftFilterRect.x + leftFilterRect.width &&
+            potential.y > leftFilterRect.y && potential.y <= leftFilterRect.y + leftFilterRect.height) {
+            maxLeftCol = potential.x;
+            leftCorner = potential;
         }
     }
-    return maxFace;
+    Point rightCorner = Point();
+    int maxRightCol = 0;
+    for (int i=0; i<potentialRightCorners.size(); i++) {
+        Point potential = potentialRightCorners.at(i);
+        if (potential.x > maxRightCol &&
+            potential.x > rightFilterRect.x && potential.x < rightFilterRect.x + rightFilterRect.width &&
+            potential.y > rightFilterRect.y && potential.y < rightFilterRect.y + rightFilterRect.height) {
+            maxRightCol = potential.x;
+            rightCorner = potential;
+        }
+    }
+
+    // draw THINGS ELSEWHERE
+    rectangle(frame, leftEyeRect, CV_RGB(0,0,255), 1);
+    rectangle(frame, rightEyeRect, CV_RGB(0,0,255), 1);
+    circle(frame, leftPupil, 3, CV_RGB(0,0,255), -1);
+    circle(frame, rightPupil, 3, CV_RGB(0,0,255), -1);
+    circle(frame, leftCorner, 2, CV_RGB(0,0,255), -1);
+    circle(frame, rightCorner, 2, CV_RGB(0,0,255), -1);
+    rectangle(frame, leftFilterRect, CV_RGB(0,0,255), 1);
+    rectangle(frame, rightFilterRect, CV_RGB(0,0,255), 1);
+
+    return;
 }
 
 int main() {
@@ -495,7 +532,7 @@ int main() {
             vector<Rect_ <int>> faces = detectFaces(gray, face_cascade_path);
             // Get the biggest face
             Rect biggestFace = getBiggestFace(faces);
-            cout << "num faces: " << faces.size();
+            //cout << "num faces: " << faces.size();
             if (biggestFace.width > 0 && biggestFace.height > 0) {
                 //weight = getWeightedImage(frame);
                 //imshow("weighted", weight);
