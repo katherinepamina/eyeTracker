@@ -224,7 +224,7 @@ void evaluateAllCenters(int x, int y, const Mat &weight, double gradX, double gr
             double dotProduct = directionX*gradX + directionY*gradY;
             dotProduct = (dotProduct > 0) ? dotProduct : -1 * dotProduct;
             //cout << "dot product: " << dotProduct << endl;
-            //double dotProductMag = (dotProduct < 0) ? -1*dotProduct : dotProduct; // <-- shouldn't ned this anymore
+            //double dotProductMag = (dotProduct < 0) ? -1*dotProduct : dotProduct; // <-- shouldn't need this anymore
             //cout << "dot product mag: " << dotProductMag << endl;
             // Add the weighting
             resultPtr[i] += dotProduct*dotProduct*weightPtr[i]/kWeightDivisor;
@@ -284,7 +284,6 @@ Point findEyeCenter(Mat eyeImageUnscaled, Rect eyeROI, String window) {
         for (int i=0; i<eyeImage.cols; i++) {
             double gradX = gradXPtr[i];
             double gradY = gradYPtr[i];
-            //cout << "gradX, gradY: " << gradX << ", " << gradY << endl;
             // if the gradient is 0, ignore the point
             if (gradX == 0.0 && gradY == 0.0) {
                 continue;
@@ -307,10 +306,7 @@ Point findEyeCenter(Mat eyeImageUnscaled, Rect eyeROI, String window) {
         const float * resultPtr = resultScaled.ptr<float>(j);
         for (int i=0; i<resultScaled.cols; i++) {
             if (resultPtr[i] > currentMax) {
-                //cout << "result i: " << resultPtr[i] << endl;
-                //cout << "prev max: " << currentMax << endl;
                 currentMax = resultPtr[i];
-                //cout << "current max: " << currentMax << endl;
                 currentMaxPoint.x = i;
                 currentMaxPoint.y = j;
             }
@@ -330,8 +326,6 @@ Point findEyeCenter(Mat eyeImageUnscaled, Rect eyeROI, String window) {
     resultCenter.x += eyeROI.x;
     resultCenter.y += eyeROI.y;
     
-    //circle(eyeImage, maxCenter, 3, CV_RGB(0,0,255), -1);
-    //imshow("eye", eyeImage);
     //const double * eyePtr = eyeImage.ptr<double>(maxCenter.y);
     //cout << "color at pupil: " << eyePtr[maxCenter.x] << endl;
     return resultCenter;
@@ -370,8 +364,8 @@ vector<Rect> getEyeRegionRect(Rect faceRect) {
 Rect getFilterArea(Rect eyeRect, Point pupil) {
     Rect filterRect = Rect();
     filterRect.x = pupil.x - eyeRect.width/5;
-    filterRect.y = pupil.y - eyeRect.height/10;
-    filterRect.height = eyeRect.height/7;
+    filterRect.y = pupil.y - eyeRect.height/12;
+    filterRect.height = eyeRect.height/5;
     filterRect.width = eyeRect.width/1.8;
 
     return filterRect;
