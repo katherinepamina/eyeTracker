@@ -334,9 +334,10 @@ Point findEyeCenter(Mat eyeImageUnscaled, Rect eyeROI, String window) {
 vector<Point> detectCorner(Mat frame, Rect eyeRect) {
     Mat img = frame(eyeRect);
     vector<Point> corners = vector<Point>();
-    goodFeaturesToTrack(img, corners, 10, 0.02, 5); // what number makes sense for the "quality level" parameter?  just using 0.02 for now
+    goodFeaturesToTrack(img, corners, 50, 0.02, 5); // what number makes sense for the "quality level" parameter?  just using 0.02 for now
     for (int i=0; i<corners.size(); i++) {
         corners.at(i) = translatePoint(corners.at(i), eyeRect);
+        //circle(frame, corners.at(i), 2, CV_RGB(0,0,255), -1);
     }
     return corners;
 }
@@ -361,12 +362,16 @@ vector<Rect> getEyeRegionRect(Rect faceRect) {
     return eyeRects;
 }
 
+/* 
+ this is the area in which we look for eye corners
+*/
 Rect getFilterArea(Rect eyeRect, Point pupil) {
     Rect filterRect = Rect();
-    filterRect.x = pupil.x - eyeRect.width/5;
+    // These hard-coded dimensions work for my eyes but still need to be tested on others
+    filterRect.x = pupil.x - eyeRect.width/3.5;
     filterRect.y = pupil.y - eyeRect.height/12;
     filterRect.height = eyeRect.height/5;
-    filterRect.width = eyeRect.width/1.8;
+    filterRect.width = eyeRect.width/1.5;
 
     return filterRect;
 }
@@ -429,26 +434,43 @@ void detectEyes(Mat &frame, Rect faceRect) {
     //cout << "left pupil: " << leftPupil.x << ", " << leftPupil.y << endl;
     // filter through the detected corners to identify two candidate eye corners for each eye
     //look for the rightmost corner for each eye
-    Point leftCorner = Point();
+    Point leftMaxCorner = Point();
+    Point leftMinCorner = Point();
+
     int maxLeftCol = 0;
+    int minLeftCol = 999999999; // haha get the actual constant?  should be fine bc images are small
     for (int i=0; i<potentialLeftCorners.size(); i++) {
         Point potential = potentialLeftCorners.at(i);
         if (potential.x > maxLeftCol &&
             potential.x > leftFilterRect.x && potential.x <= leftFilterRect.x + leftFilterRect.width &&
             potential.y > leftFilterRect.y && potential.y <= leftFilterRect.y + leftFilterRect.height) {
             maxLeftCol = potential.x;
-            leftCorner = potential;
+            leftMaxCorner = potential;
+        }
+        else if (potential.x < minLeftCol &&
+            potential.x > leftFilterRect.x && potential.x <= leftFilterRect.x + leftFilterRect.width &&
+            potential.y > leftFilterRect.y && potential.y <= leftFilterRect.y + leftFilterRect.height) {
+            minLeftCol = potential.x;
+            leftMinCorner = potential;
         }
     }
-    Point rightCorner = Point();
+    Point rightMaxCorner = Point();
+    Point rightMinCorner = Point();
     int maxRightCol = 0;
+    int minRightCol = 0;
     for (int i=0; i<potentialRightCorners.size(); i++) {
         Point potential = potentialRightCorners.at(i);
         if (potential.x > maxRightCol &&
             potential.x > rightFilterRect.x && potential.x < rightFilterRect.x + rightFilterRect.width &&
             potential.y > rightFilterRect.y && potential.y < rightFilterRect.y + rightFilterRect.height) {
             maxRightCol = potential.x;
-            rightCorner = potential;
+            rightMaxCorner = potential;
+        }
+        else if (potential.x < minRightCol &&
+            potential.x > rightFilterRect.x && potential.x <= rightFilterRect.x + rightFilterRect.width &&
+            potential.y > rightFilterRect.y && potential.y <= rightFilterRect.y + rightFilterRect.height) {
+            minRightCol = potential.x;
+            rightMinCorner = potential;
         }
     }
 
@@ -457,8 +479,10 @@ void detectEyes(Mat &frame, Rect faceRect) {
     rectangle(frame, rightEyeRect, CV_RGB(0,0,255), 1);
     circle(frame, leftPupil, 3, CV_RGB(0,0,255), -1);
     circle(frame, rightPupil, 3, CV_RGB(0,0,255), -1);
-    circle(frame, leftCorner, 2, CV_RGB(0,0,255), -1);
-    circle(frame, rightCorner, 2, CV_RGB(0,0,255), -1);
+    circle(frame, leftMinCorner, 2, CV_RGB(0,0,255), -1);
+    circle(frame, rightMinCorner, 2, CV_RGB(0,0,255), -1);
+    circle(frame, leftMaxCorner, 2, CV_RGB(0,0,255), -1);
+    circle(frame, rightMaxCorner, 2, CV_RGB(0,0,255), -1);
     rectangle(frame, leftFilterRect, CV_RGB(0,0,255), 1);
     rectangle(frame, rightFilterRect, CV_RGB(0,0,255), 1);
 
