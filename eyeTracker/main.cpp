@@ -457,7 +457,7 @@ void detectEyes(Mat &frame, Rect faceRect) {
     Point rightMaxCorner = Point();
     Point rightMinCorner = Point();
     int maxRightCol = 0;
-    int minRightCol = 0;
+    int minRightCol = 999999999;
     for (int i=0; i<potentialRightCorners.size(); i++) {
         Point potential = potentialRightCorners.at(i);
         if (potential.x > maxRightCol &&
